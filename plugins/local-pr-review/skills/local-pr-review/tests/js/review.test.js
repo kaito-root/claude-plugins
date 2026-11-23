@@ -106,3 +106,26 @@ test("the page starts in Vietnamese only for a Vietnamese browser", () => {
 test("every label of the page exists in both languages", () => {
   assert.deepEqual(Object.keys(review.LABELS.vi).sort(), Object.keys(review.LABELS.en).sort());
 });
+
+test("a thread of the discussion sits after Claude's notes on its line", () => {
+  const analysis = { comments: [{ id: "c0", file: "f1", side: "new", line: 12 }], explanations: [] };
+  const discussion = { threads: [{ id: "t1", file: "f1", side: "new", line: 12, messages: [] }, { id: "t2", file: "f2", side: "old", line: 3, messages: [] }] };
+
+  const index = review.indexNotes(analysis, discussion);
+
+  assert.deepEqual(index.f1.at["new:12"].map((note) => [note.id, note.kind]), [["c0", "comment"], ["t1", "thread"]]);
+  assert.deepEqual(index.f2.at["old:3"].map((note) => note.id), ["t2"]);
+  assert.equal(index.f1.count, 2);
+});
+
+test("a submitted review names a thread for a reply and a line for a new comment", () => {
+  const drafts = [
+    { key: "1", thread: "t1", path: "a.rb", side: "new", line: 4, body: "Chưa rõ." },
+    { key: "2", thread: null, path: "a.rb", side: "old", line: 9, re: "Row lock", body: "Vì sao?" },
+  ];
+
+  assert.deepEqual(review.submission(drafts), { comments: [
+    { thread: "t1", body: "Chưa rõ." },
+    { path: "a.rb", side: "old", line: 9, re: "Row lock", body: "Vì sao?" },
+  ] });
+});

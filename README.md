@@ -4,7 +4,7 @@ Plugins for [Claude Code](https://claude.com/claude-code).
 
 | Plugin | What it does |
 |---|---|
-| `local-pr-review` | Reviews your local Git changes and builds one HTML page that reads like a pull request: the diff, Claude's explanations and review comments next to the code, in Vietnamese and English. Nothing is pushed and nothing leaves your machine. |
+| `local-pr-review` | Reviews your local Git changes and builds one HTML page that reads like a pull request: the diff, Claude's explanations and review comments next to the code, in Vietnamese and English. You can comment back in the page and Claude replies. Nothing is pushed and nothing leaves your machine. |
 
 ## Install
 
@@ -49,6 +49,9 @@ What to expect:
 - Every comment is checked against the diff before the page is built, so a note can't land next to
   the wrong line.
 - The page has a VI / EN switch, a unified and a side-by-side view, and a dark theme.
+- You can answer back. The page is served on `127.0.0.1` while your Claude Code session is open:
+  comment on any line or reply to one of Claude's notes, press **Submit review**, and Claude answers
+  in the same thread. The page reloads itself when the answers are in.
 
 ## Working on a plugin
 

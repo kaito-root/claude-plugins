@@ -312,3 +312,31 @@ body.hide-notes tr.thread, body.hide-notes .file-summary, body.hide-notes .loose
   .layout { display: block; }
   .file-head { position: static; }
 }
+
+/* the reviewer's own comments (only when the review server is running) */
+.tool.primary { background: #1a7f37; border-color: #1a7f37; color: #fff; }
+.tool.primary:disabled { opacity: 0.5; cursor: default; }
+td.code { position: relative; }
+.add-comment { position: absolute; left: 1px; top: 1px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: var(--accent); color: #fff; font: 600 13px/18px var(--sans); cursor: pointer; display: none; }
+tr.row:hover .add-comment, .add-comment:focus { display: block; }
+.note-actions { display: flex; gap: 10px; margin-top: 8px; }
+.link { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; }
+.link:hover { text-decoration: underline; }
+.note.thread, .note.draft, .note.composer { background: var(--bg); border-left-color: var(--accent); }
+.note.draft { border-left-color: var(--sev-minor); border-style: dashed; border-left-style: solid; }
+.note.draft.was-sent { border-left-color: var(--add-text); }
+.thread-badge { background: var(--accent); text-transform: none; }
+.draft-badge { background: var(--sev-minor); text-transform: none; }
+.was-sent .draft-badge { background: #1a7f37; }
+.thread-re { color: var(--text-muted); font-size: 13px; overflow-wrap: anywhere; }
+.waiting-tag { color: var(--sev-minor); border-color: var(--sev-minor); }
+.message { margin-top: 8px; padding: 8px 10px; border-radius: 6px; background: var(--bg-subtle); }
+.message-claude { background: var(--note-bg); border-left: 3px solid var(--note-border); }
+.message-author { font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 2px; }
+.note .note.draft, .note .note.composer { margin-top: 8px; }
+.composer textarea { display: block; width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: 14px/1.5 var(--sans); resize: vertical; }
+.live-banner { margin: 0 0 14px; padding: 10px 14px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent-bg); display: flex; gap: 12px; align-items: center; }
+.live-banner.error { border-color: var(--sev-critical); background: var(--del-bg); }
+.live-banner.waiting::before { content: ""; flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .live-banner.waiting::before { animation: none; } }

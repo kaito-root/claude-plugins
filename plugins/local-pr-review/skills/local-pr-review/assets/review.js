@@ -175,8 +175,9 @@
     });
   }
 
-  // analysis -> { fileId: { at: {"side:line": [notes]}, loose: [notes], ranges: [...], count } }
-  function indexNotes(analysis) {
+  // analysis + discussion -> { fileId: { at: {"side:line": [notes]}, loose: [notes], ranges: [...], count } }
+  // A thread of the discussion sits after Claude's notes on the same line.
+  function indexNotes(analysis, discussion) {
     var index = Object.create(null);
     function bucket(fileId) {
       return (index[fileId] = index[fileId] || { at: Object.create(null), loose: [], ranges: [], count: 0 });
@@ -193,6 +194,7 @@
     }
     ((analysis && analysis.explanations) || []).forEach(function (note) { place(note, "explanation"); });
     ((analysis && analysis.comments) || []).forEach(function (note) { place(note, "comment"); });
+    ((discussion && discussion.threads) || []).forEach(function (thread) { place(thread, "thread"); });
     return index;
   }
 
@@ -205,6 +207,14 @@
 
   function defaultLanguage(browserLanguage) {
     return /^vi\b/i.test(String(browserLanguage || "")) ? "vi" : "en";
+  }
+
+  // What the page sends when the reviewer submits: a reply names its thread, a new comment names its line.
+  function submission(drafts) {
+    return { comments: drafts.map(function (draft) {
+      if (draft.thread) return { thread: draft.thread, body: draft.body };
+      return { path: draft.path, side: draft.side, line: draft.line, re: draft.re || null, body: draft.body };
+    }) };
   }
 
   function plural(count, one, many) { return count + " " + (count === 1 ? one : many); }
@@ -257,7 +267,17 @@
       truncated: function (n, limit) { return plural(n, "file is", "files are") + " cut at " + limit + " diff lines."; },
       omitted: function (n, limit) { return plural(n, "file is", "files are") + " listed without content: the review reached " + limit + " diff lines."; },
       sensitive: function (n) { return plural(n, "file that usually holds credentials is", "files that usually hold credentials are") + " listed without content."; },
-      redactions: function (n) { return plural(n, "value that looks like a secret was", "values that look like secrets were") + " redacted in the code below."; }
+      redactions: function (n) { return plural(n, "value that looks like a secret was", "values that look like secrets were") + " redacted in the code below."; },
+      addLineComment: "Comment on this line", reply: "Reply", cancel: "Cancel", addComment: "Add comment",
+      pending: "Pending", sentBadge: "Sent", edit: "Edit", remove: "Delete", you: "You", discussion: "Discussion", regarding: "Re: ",
+      waitingReply: "Waiting for Claude",
+      writeHere: "Write your comment. `code` and **bold** work. Claude answers after you submit the review.",
+      submitReview: function (n) { return n ? "Submit review (" + n + ")" : "Submit review"; },
+      submitHint: "Send your pending comments to Claude",
+      sent: function (n) { return plural(n, "comment", "comments") + " sent. Claude is reading the code and will answer here. The page reloads on its own."; },
+      sendFailed: "The review server did not answer. Is the Claude Code session that opened this page still running?",
+      sendRefused: "The review was not accepted: ",
+      newVersion: "A newer version of this page is ready.", reload: "Reload"
     },
     vi: {
       changedFiles: "File thay đổi",
@@ -305,11 +325,21 @@
       truncated: function (n, limit) { return n + " file bị cắt ở " + limit + " dòng diff."; },
       omitted: function (n, limit) { return n + " file chỉ được liệt kê, không có nội dung: review đã chạm " + limit + " dòng diff."; },
       sensitive: function (n) { return n + " file thường chứa credentials chỉ được liệt kê, không có nội dung."; },
-      redactions: function (n) { return n + " giá trị trông giống secret đã được che trong code bên dưới."; }
+      redactions: function (n) { return n + " giá trị trông giống secret đã được che trong code bên dưới."; },
+      addLineComment: "Comment vào dòng này", reply: "Trả lời", cancel: "Huỷ", addComment: "Thêm comment",
+      pending: "Chưa gửi", sentBadge: "Đã gửi", edit: "Sửa", remove: "Xoá", you: "Bạn", discussion: "Thảo luận", regarding: "Về: ",
+      waitingReply: "Đang chờ Claude",
+      writeHere: "Viết comment của bạn. Dùng được `code` và **bold**. Claude trả lời sau khi bạn submit review.",
+      submitReview: function (n) { return n ? "Submit review (" + n + ")" : "Submit review"; },
+      submitHint: "Gửi các comment chưa gửi cho Claude",
+      sent: function (n) { return "Đã gửi " + n + " comment. Claude đang đọc code và sẽ trả lời ngay tại đây. Trang sẽ tự tải lại."; },
+      sendFailed: "Server review không phản hồi. Phiên Claude Code đã mở trang này còn chạy không?",
+      sendRefused: "Review không được nhận: ",
+      newVersion: "Trang này đã có bản mới.", reload: "Tải lại"
     }
   };
 
-  var api = { languageOf: languageOf, tokenize: tokenize, pairLines: pairLines, parseMarkdown: parseMarkdown, groupByFolder: groupByFolder, indexNotes: indexNotes, pickText: pickText, defaultLanguage: defaultLanguage, LABELS: LABELS };
+  var api = { languageOf: languageOf, tokenize: tokenize, pairLines: pairLines, parseMarkdown: parseMarkdown, groupByFolder: groupByFolder, indexNotes: indexNotes, pickText: pickText, defaultLanguage: defaultLanguage, submission: submission, LABELS: LABELS };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   if (typeof document === "undefined") return;
 
@@ -320,7 +350,8 @@
   var data = JSON.parse(document.getElementById("review-data").textContent);
   var changes = data.changes;
   var analysis = data.analysis;
-  var notes = indexNotes(analysis);
+  var discussion = data.discussion || { threads: [] };
+  var notes = indexNotes(analysis, discussion);
   var SEVERITY_ORDER = ["critical", "major", "minor", "nit", "question"];
   var STATUS_LETTER = { added: "A", modified: "M", deleted: "D", renamed: "R", copied: "C", typechange: "T", unmerged: "U" };
   var EXCLUDED_LABEL = { "sensitive": "excludedSensitive", "size-limit": "excludedSize", "not-a-file": "excludedNotFile" };
@@ -331,6 +362,17 @@
   var searchBox = null;
   var observer = null;
   var state = { view: "unified", wrap: false, notes: true, theme: null, lang: "en", all: false };
+  // Commenting needs the local review server, which hands the page a token. A file opened from disk is read-only.
+  var tokenTag = document.querySelector('meta[name="review-token"]');
+  var live = window.location.protocol === "http:" && Boolean(tokenTag);
+  var draftsKey = "drafts:" + changes.generated_at;
+  var drafts = [];
+  var sent = [];
+  var composer = null;
+  var banner = null;
+  var submitButton = null;
+  var loadedVersion = null;
+  var reloadWanted = false;
 
   // label("showLines", 3) -> the label in the reader's language
   function label(key) {
@@ -526,12 +568,99 @@
   function explainPart(title, text, extra) {
     return own(text) ? h("div", { class: "explain-part" }, h("h5", null, title, extra || null), markdown(text)) : null;
   }
+  function sameSpot(item, path, side, line) { return item.path === path && item.side === side && item.line === line; }
+  function fileStateOf(path) { return fileStates.filter(function (candidate) { return candidate.file.path === path; })[0]; }
+  function redrawFile(path) {
+    var fileState = fileStateOf(path);
+    if (!fileState) return;
+    if (fileState.collapsed) setCollapsed(fileState, false);
+    else renderFile(fileState);
+  }
+  function saveDrafts() {
+    remember(draftsKey, drafts);
+    if (submitButton) {
+      submitButton.textContent = label("submitReview", drafts.length);
+      submitButton.disabled = !drafts.length;
+    }
+  }
+  function openComposer(target) {
+    var previous = composer;
+    composer = { path: target.path, side: target.side, line: target.line, thread: target.thread || null, re: target.re || null, body: target.body || "" };
+    if (previous && previous.path !== composer.path) redrawFile(previous.path);
+    redrawFile(composer.path);
+    var box = document.querySelector(".composer textarea");
+    if (box) box.focus();
+  }
+  function closeComposer() {
+    var path = composer.path;
+    composer = null;
+    if (reloadWanted) { window.location.reload(); return; }
+    redrawFile(path);
+  }
+  function addDraft() {
+    if (!composer.body.trim()) return;
+    drafts.push({ key: String(Date.now()) + Math.random(), path: composer.path, side: composer.side, line: composer.line, thread: composer.thread, re: composer.re, body: composer.body.trim() });
+    saveDrafts();
+    closeComposer();
+  }
+  function composerCard() {
+    var box = h("textarea", { rows: 4, placeholder: label("writeHere"), oninput: function () { composer.body = box.value; } });
+    box.value = composer.body;
+    return h("div", { class: "note composer" },
+      composer.re ? h("p", { class: "thread-re" }, label("regarding"), composer.re) : null,
+      box,
+      h("div", { class: "note-actions" },
+        h("button", { type: "button", class: "tool primary composer-add", onclick: addDraft }, label("addComment")),
+        h("button", { type: "button", class: "tool", onclick: closeComposer }, label("cancel"))));
+  }
+  function draftCard(draft, wasSent) {
+    function drop() {
+      drafts = drafts.filter(function (other) { return other !== draft; });
+      saveDrafts();
+    }
+    return h("article", { class: "note draft" + (wasSent ? " was-sent" : "") },
+      h("header", null, h("span", { class: "badge draft-badge" }, label(wasSent ? "sentBadge" : "pending")), h("strong", null, label("you")),
+        !draft.thread && draft.re ? h("span", { class: "thread-re" }, label("regarding"), draft.re) : null),
+      markdown(draft.body),
+      wasSent ? null : h("div", { class: "note-actions" },
+        h("button", { type: "button", class: "link", onclick: function () { drop(); openComposer(draft); } }, label("edit")),
+        h("button", { type: "button", class: "link", onclick: function () { drop(); redrawFile(draft.path); } }, label("remove"))));
+  }
+  function ownCards(match) {
+    var cards = sent.filter(match).map(function (draft) { return draftCard(draft, true); })
+      .concat(drafts.filter(match).map(function (draft) { return draftCard(draft, false); }));
+    if (composer && match(composer)) cards.push(composerCard());
+    return cards;
+  }
+  function replyButton(target) {
+    if (!live) return null;
+    return h("div", { class: "note-actions" }, h("button", { type: "button", class: "link reply", onclick: function () { openComposer(target); } }, label("reply")));
+  }
+  function threadCard(thread) {
+    function inThread(item) { return item.thread === thread.id; }
+    var last = thread.messages[thread.messages.length - 1];
+    var composing = composer && inThread(composer);
+    return h("article", { class: "note thread", id: "note-" + thread.id },
+      h("header", null, h("span", { class: "badge thread-badge" }, label("discussion")),
+        thread.re ? h("span", { class: "thread-re" }, label("regarding"), thread.re) : null,
+        last && last.author === "you" ? h("span", { class: "tag waiting-tag" }, label("waitingReply")) : null,
+        h("span", { class: "note-place" }, lineLabel(thread))),
+      thread.messages.map(function (message) {
+        return h("div", { class: "message message-" + message.author },
+          h("div", { class: "message-author" }, message.author === "you" ? label("you") : "Claude"), markdown(message.body));
+      }),
+      ownCards(inThread),
+      composing ? null : replyButton({ path: thread.path, side: thread.side, line: thread.line, thread: thread.id }));
+  }
   function noteCard(note) {
+    if (note.kind === "thread") return threadCard(note);
+    var reply = replyButton({ path: note.path, side: note.side, line: note.end_line || note.line, re: plainText(note.title) });
     if (note.kind === "comment") {
       return h("article", { class: "note comment sev-" + note.severity, id: "note-" + note.id },
         h("header", null, h("span", { class: "badge sev-" + note.severity }, note.severity), h("strong", null, inlineText(note.title)), h("span", { class: "note-place" }, lineLabel(note))),
         markdown(note.body),
-        own(note.suggestion) ? h("div", { class: "suggestion" }, h("h5", null, label("fix")), markdown(note.suggestion)) : null);
+        own(note.suggestion) ? h("div", { class: "suggestion" }, h("h5", null, label("fix")), markdown(note.suggestion)) : null,
+        reply);
     }
     return h("details", { class: "note explain", id: "note-" + note.id, open: true },
       h("summary", null, h("span", { class: "badge explain-badge" }, "Claude"), h("strong", null, inlineText(note.title)), h("span", { class: "note-place" }, lineLabel(note))),
@@ -539,10 +668,15 @@
       explainPart(label("why"), note.why, h("span", { class: "tag basis-" + note.why_basis, title: label(note.why_basis + "Hint") }, label(note.why_basis))),
       explainPart(label("how"), note.how),
       explainPart(label("risks"), note.risks),
-      explainPart(label("improvements"), note.improvements));
+      explainPart(label("improvements"), note.improvements),
+      reply);
   }
-  function threadRow(list, columns) {
-    return h("tr", { class: "thread" }, h("td", { colspan: columns }, h("div", { class: "thread-inner" }, list.map(noteCard))));
+  function threadRow(list, columns, extras) {
+    return h("tr", { class: "thread" }, h("td", { colspan: columns }, h("div", { class: "thread-inner" }, list.map(noteCard), extras)));
+  }
+  // The reviewer's own new comments on a line: sent ones, pending ones and the one being written.
+  function ownCardsAt(path, keys) {
+    return ownCards(function (item) { return !item.thread && item.path === path && keys.indexOf(item.side + ":" + item.line) >= 0; });
   }
 
   // -- diff rows ------------------------------------------------------------------------------
@@ -570,10 +704,17 @@
       if (left && left.o !== null) { row.setAttribute("data-o", left.o); keys.push("old:" + left.o); }
       if (right && right.n !== null) { row.setAttribute("data-n", right.n); keys.push("new:" + right.n); }
       if ((left && inRange(context.notes, "old", left.o)) || (right && inRange(context.notes, "new", right.n))) row.setAttribute("data-range", "1");
+      if (live && keys.length) {
+        var spot = right && right.n !== null ? { side: "new", line: right.n } : { side: "old", line: left.o };
+        row.lastChild.appendChild(h("button", { type: "button", class: "add-comment", title: label("addLineComment"), "aria-label": label("addLineComment"), onclick: function () {
+          openComposer({ path: context.path, side: spot.side, line: spot.line });
+        } }, "+"));
+      }
       rows.push(row);
       var attached = [];
       keys.forEach(function (key) { attached = attached.concat(context.notes.at[key] || []); });
-      if (attached.length) rows.push(threadRow(attached, columns));
+      var extras = ownCardsAt(context.path, keys);
+      if (attached.length || extras.length) rows.push(threadRow(attached, columns, extras));
     }
     if (context.view === "split") {
       pairLines(lines).forEach(function (pair) {
@@ -595,14 +736,17 @@
   function gapLines(segment) {
     return segment.lines.map(function (text, offset) { return { t: "ctx", o: segment.o + offset, n: segment.n + offset, s: text }; });
   }
-  function gapHasNotes(segment, fileNotes) {
-    return gapLines(segment).some(function (line) { return fileNotes.at["new:" + line.n] || fileNotes.at["old:" + line.o]; });
+  function gapHasNotes(segment, context) {
+    return gapLines(segment).some(function (line) {
+      var keys = ["new:" + line.n, "old:" + line.o];
+      return context.notes.at[keys[0]] || context.notes.at[keys[1]] || ownCardsAt(context.path, keys).length;
+    });
   }
   function gapRows(segment, context) {
     var columns = context.view === "split" ? 4 : 3;
     var hidden = segment.lines.length;
     if (!hidden) return [h("tr", { class: "gap" }, h("td", { colspan: columns }, h("span", { class: "gap-text" }, label("skippedLines", segment.skipped))))];
-    if (gapHasNotes(segment, context.notes)) return lineRows(gapLines(segment), context);
+    if (gapHasNotes(segment, context)) return lineRows(gapLines(segment), context);
     var row = h("tr", { class: "gap" });
     var button = h("button", { type: "button", class: "gap-button", onclick: function () {
       var fragment = document.createDocumentFragment();
@@ -620,7 +764,7 @@
   function diffTable(file) {
     // A file that only exists on one side would leave half of a side-by-side table empty.
     var view = file.status === "added" || file.status === "deleted" ? "unified" : state.view;
-    var context = { view: view, language: languageOf(file.path), notes: notes[file.id] || { at: {}, loose: [], ranges: [], count: 0 } };
+    var context = { view: view, path: file.path, language: languageOf(file.path), notes: notes[file.id] || { at: {}, loose: [], ranges: [], count: 0 } };
     var columns = view === "split" ? 4 : 3;
     var body = h("tbody");
     file.segments.forEach(function (segment) {
@@ -794,7 +938,53 @@
     remember("lang", language);
     draw();
   }
+  function showBanner(kind, text, action) {
+    while (banner.firstChild) banner.removeChild(banner.firstChild);
+    banner.className = "live-banner " + kind;
+    banner.hidden = false;
+    append(banner, [text, action || null]);
+  }
+  function submitReview() {
+    var sending = drafts.slice();
+    submitButton.disabled = true;
+    window.fetch("/submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Review-Token": tokenTag.getAttribute("content") },
+      body: JSON.stringify(submission(sending))
+    }).then(function (response) {
+      return response.json().then(function (answer) { return { ok: response.ok, answer: answer }; });
+    }).then(function (result) {
+      if (!result.ok) {
+        showBanner("error", label("sendRefused") + (result.answer.errors || []).join(" "));
+        saveDrafts();
+        return;
+      }
+      sent = sent.concat(sending);
+      drafts = drafts.filter(function (draft) { return sending.indexOf(draft) < 0; });
+      saveDrafts();
+      redrawDiffs();
+      showBanner("waiting", label("sent", sent.length));
+    }).catch(function () {
+      showBanner("error", label("sendFailed"));
+      saveDrafts();
+    });
+  }
+  // The server stops while Claude answers and comes back with a newer page. Then the page reloads.
+  function watchForNewVersion() {
+    function check() {
+      window.fetch("/state", { cache: "no-store" }).then(function (response) { return response.json(); }).then(function (current) {
+        if (loadedVersion === null) { loadedVersion = current.version; return; }
+        if (current.version === loadedVersion) return;
+        if (!composer) { window.location.reload(); return; }
+        reloadWanted = true;
+        showBanner("waiting", label("newVersion"), h("button", { type: "button", class: "tool", onclick: function () { window.location.reload(); } }, label("reload")));
+      }).catch(function () { /* the server is away while Claude answers */ });
+    }
+    check();
+    window.setInterval(check, 2500);
+  }
   function toolbar() {
+    submitButton = live ? h("button", { type: "button", class: "tool primary submit-review", title: label("submitHint"), disabled: !drafts.length, onclick: submitReview }, label("submitReview", drafts.length)) : null;
     return h("header", { class: "topbar" },
       h("a", { class: "brand", href: "#summary" }, "Local PR Review"),
       h("span", { class: "topbar-branch", title: changes.scope.label }, changes.repo.branch),
@@ -823,7 +1013,8 @@
         state.theme = dark ? "light" : "dark";
         remember("theme", state.theme);
         applyTheme();
-      } }, label("theme")));
+      } }, label("theme")),
+      submitButton);
   }
 
   // -- drawing and start-up -------------------------------------------------------------------
@@ -863,7 +1054,9 @@
 
     var app = document.getElementById("app");
     while (app.firstChild) app.removeChild(app.firstChild);
-    append(app, [toolbar(), h("div", { class: "layout" }, side, h("main", null, summary(),
+    var hadBanner = banner && !banner.hidden ? banner : null;
+    banner = hadBanner || h("div", { class: "live-banner", hidden: true, role: "status" });
+    append(app, [toolbar(), h("div", { class: "layout" }, side, h("main", null, banner, summary(),
       h("h2", { class: "section-title", id: "files" }, label("changes")),
       fileStates.map(function (fileState) { return fileState.section; })))]);
     document.body.classList.toggle("hide-notes", !state.notes);
@@ -907,7 +1100,13 @@
     state.all = Boolean(options.all);
     applyTheme();
     document.body.classList.toggle("wrap", state.wrap);
+    if (live) {
+      var stored = recall(draftsKey, []);
+      drafts = Array.isArray(stored) ? stored : [];
+      document.body.classList.add("live");
+    }
     draw();
+    if (live) watchForNewVersion();
     keyboard();
     window.addEventListener("beforeprint", function () {
       fileStates.forEach(function (fileState) { if (!fileState.collapsed && !fileState.rendered) renderFile(fileState); });

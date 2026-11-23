@@ -1,6 +1,6 @@
 ---
 name: local-pr-review
-description: Use when the user wants their local Git changes reviewed like a pull request, without pushing or opening a PR — "/local-pr-review", "review my diff", "review what I just changed", "xem lại code trước khi commit", staged or unstaged changes, a branch against main, or one commit — and wants a page to read rather than `git diff` in the terminal.
+description: Use when the user wants their local Git changes reviewed like a pull request, without pushing or opening a PR — "/local-pr-review", "review my diff", "review what I just changed", "xem lại code trước khi commit", staged or unstaged changes, a branch against main, or one commit — and wants a page to read, comment on and get answers in, rather than `git diff` in the terminal.
 argument-hint: "[--staged | --unstaged | --base <ref> | --commit <sha>] [--include-untracked]"
 ---
 
@@ -14,9 +14,11 @@ your review next to the code. Three parts, kept apart on purpose:
 | Collect the diff | `scripts/collect_diff.py` | `changes.json`, `digest.md` |
 | Review it | **you**, in this session | `analysis.json` |
 | Draw the page | `scripts/render_review.py` | `review.html` |
+| Talk about it | `scripts/serve_review.py`, the user, then **you** | `discussion.json` |
 
 The scripts never write review text. Whatever the page says about the code, you wrote, so it has to be
-true. Nothing here edits source files, the index or history, and nothing leaves the machine.
+true. Nothing here edits source files, the index or history, and nothing leaves the machine: the
+page is served on `127.0.0.1` only.
 
 ## 1. Collect
 
@@ -150,19 +152,70 @@ field you have nothing true to put in.
 ## 4. Render
 
 ```bash
-python3 ${CLAUDE_SKILL_DIR}/scripts/render_review.py <run_dir> --open
+python3 ${CLAUDE_SKILL_DIR}/scripts/render_review.py <run_dir>
 ```
 
-It checks every path and line in `analysis.json` against the diff and exits 1 with the list of
-problems. Fix `analysis.json` (take the line from the digest again) and run it again until it passes.
-Leave `--open` off when the user asked not to open a browser or there is no display.
+It checks every path and line in `analysis.json` (and in `discussion.json`, once there is one) against
+the diff and exits 1 with the list of problems. Fix the file (take the line from the digest again) and
+run it again until it passes. It prints the page's path and its `live:` address.
 
-## 5. Report
+## 5. Serve the page, so the user can comment on it
+
+Start the review server **as a background command** (`run_in_background: true`):
+
+```bash
+python3 ${CLAUDE_SKILL_DIR}/scripts/serve_review.py <run_dir> --open
+```
+
+It serves the page on the `live:` address, on this machine only. There the user can comment on any
+line, reply to your notes, and press **Submit review**. The server then saves the comments to
+`discussion.json` and exits, which calls you back (step 7). Do not wait for it: go on to step 6.
+
+- Exit code 0: a review was submitted. Go to step 7.
+- Exit code 3: four hours passed without a submission. Nothing to do. The review stays on disk.
+- Exit code 2 right away: the port is taken. Run it again with `--new-port` and give the user the new
+  address it is saved under (`server.json` in the run folder).
+- Leave `--open` off when the page is already open (every round after the first), when the user asked
+  not to open a browser, or when there is no display.
+
+## 6. Report
 
 Tell the user, briefly and in the language they write in: the scope that was reviewed (the summary's
-`scope`, base commit, file and line counts), the path of `review.html`, the comments at `critical` and
-`major` with their `path:line`, and anything the review did not cover (untracked files left out, cut or
-omitted files).
+`scope`, base commit, file and line counts), the `live:` address and the path of `review.html`, the
+comments at `critical` and `major` with their `path:line`, and anything the review did not cover
+(untracked files left out, cut or omitted files). Say that they can comment in the page and that you
+answer there after they press Submit review. Then end your turn.
+
+## 7. Answer the user's comments
+
+You are here because the server exited with code 0. Read `discussion.json` in the run folder:
+
+```json
+{ "threads": [ {
+  "id": "t1", "path": "app/services/pay.rb", "side": "new", "line": 14, "re": "The charge runs before the transaction commits",
+  "messages": [ { "author": "you", "body": "Gateway có idempotency key mà?", "at": "..." } ]
+} ] }
+```
+
+A thread whose last message has `"author": "you"` is waiting for you. `re` is the title of the note
+the user replied to, or null for a comment on a plain line.
+
+1. For each waiting thread, read the code the comment is about, and whatever else it takes to answer
+   truthfully. A reply about code you did not open is a guess.
+2. Append one message to that thread, in both languages:
+   `{ "author": "claude", "body": { "vi": "...", "en": "..." } }`.
+   Never edit or remove a message whose author is `you`.
+3. Answer the way a good reviewer answers on a pull request: to the point, with the line or the
+   behaviour as evidence. If the user is right, say so plainly and say what changes. If you still
+   disagree, say why. If you cannot tell from the repository, say what you would need to see.
+4. When a comment shows that part of your review was wrong or missing, correct `analysis.json` too
+   (drop or reword the finding, or add one), and say in the thread that you did.
+5. When a comment asks for a code change, describe the change in the thread. Do not edit source files
+   because of a comment in the page. List the request in your message to the user, and make the change
+   only when they ask for it in the conversation.
+6. Render again (step 4), then start the server again in the background (step 5) **without `--open`**:
+   the open page reloads itself and shows your answers. Tell the user in a line or two which threads
+   you answered and anything from point 5.
 
 ## Good to know
 
@@ -173,6 +226,10 @@ omitted files).
   those files yourself to fill the gap.
 - The page opens in Vietnamese for a Vietnamese browser and in English otherwise, and remembers the
   reader's choice. `review.html#lang=vi` or `#lang=en` forces one.
+- Commenting only works on the `live:` address while the server runs. `review.html` opened from disk
+  shows the review and the discussion so far, read-only. To pick a review up again later, render it
+  and start the server again.
+- Comments the user has written but not submitted are kept in their browser, so a reload loses nothing.
 - Keys on the page: `j` / `k` next and previous file, `/` filter files.
 - To change how the page looks, edit `assets/review.css` and `assets/review.js`. To change what counts
   as sensitive or generated, edit `scripts/redaction.py` and `GENERATED` in `scripts/collect_diff.py`.

@@ -15,7 +15,9 @@ import sys
 import webbrowser
 from pathlib import Path
 
+import discussion as talk
 from analysis_check import check_analysis
+from serve_review import server_config
 
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
 # Inside a <script> block only these can end the block or start markup. JSON reads them back unchanged.
@@ -46,7 +48,7 @@ def data_block(data: dict) -> str:
     return re.sub("[<>&  ]", lambda match: DATA_ESCAPES[match.group()], text)
 
 
-def build_page(changes: dict, analysis) -> str:
+def build_page(changes: dict, analysis, discussion=None) -> str:
     style = (ASSETS / "review.css").read_text(encoding="utf-8")
     script = (ASSETS / "review.js").read_text(encoding="utf-8")
     if "</style" in style.lower() or "</script" in script.lower():
@@ -59,7 +61,7 @@ def build_page(changes: dict, analysis) -> str:
         "TITLE": html.escape(f"{title} · Local PR Review"),
         "CSS": style,
         "JS": script,
-        "DATA": data_block({"changes": changes, "analysis": analysis}),
+        "DATA": data_block({"changes": changes, "analysis": analysis, "discussion": discussion or {"threads": []}}),
     }
     template = (ASSETS / "template.html").read_text(encoding="utf-8")
     # One pass, so review text that happens to contain "{{JS}}" is never substituted again.
@@ -93,9 +95,23 @@ def main(argv=None) -> int:
     else:
         notes.append(f"note: no analysis.json in {folder}; the page shows the diff only")
 
+    raw_discussion, problem = talk.read(folder)
+    discussion, errors = (None, [problem]) if problem else talk.check_discussion(raw_discussion, changes)
+    if errors:
+        (folder / "review.html").unlink(missing_ok=True)
+        print(f"local-pr-review: discussion.json has {len(errors)} problem(s). Fix them and run again:", file=sys.stderr)
+        for error in errors:
+            print(f"  - {error}", file=sys.stderr)
+        return 1
+    unanswered = talk.waiting(discussion["threads"])
+    if unanswered:
+        notes.append(f"threads waiting for a reply: {', '.join(unanswered)}")
+
     target = folder / "review.html"
-    target.write_text(build_page(changes, analysis), encoding="utf-8")
+    target.write_text(build_page(changes, analysis, discussion), encoding="utf-8")
+    config = server_config(folder)
     print(f"review: {target}")
+    print(f"live: http://{config['host']}:{config['port']}/ once serve_review.py is running")
     for note in notes:
         print(note)
     if options.open:
