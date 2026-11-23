@@ -1,0 +1,8 @@
+{
+  "name": "local-pr-review",
+  "version": "1.0.0",
+  "description": "Review local Git changes as a self-contained HTML page that reads like a pull request, with Claude's notes next to the code (VI/EN).",
+  "author": {
+    "name": "kaito-root"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "kaito-tools",
+  "description": "Claude Code plugins by kaito-root.",
+  "owner": {
+    "name": "kaito-root"
+  },
+  "plugins": [
+    {
+      "name": "local-pr-review",
+      "source": "./plugins/local-pr-review",
+      "description": "Review local Git changes as a self-contained HTML page that reads like a pull request, with Claude's notes next to the code (VI/EN)."
+    }
+  ]
+}
